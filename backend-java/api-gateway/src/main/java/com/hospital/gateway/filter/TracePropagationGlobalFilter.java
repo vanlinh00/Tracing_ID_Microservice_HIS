@@ -44,8 +44,10 @@ public class TracePropagationGlobalFilter implements GlobalFilter, Ordered {
         String outgoingTraceparent;
 
         if (inboundTraceparent != null && W3C_TRACEPARENT_PATTERN.matcher(inboundTraceparent).matches()) {
+            String[] parts = inboundTraceparent.split("-");
+            traceId = parts[1];
+            spanId = parts[2];
             outgoingTraceparent = inboundTraceparent;
-            traceId = inboundTraceparent.split("-")[1];
         } else {
             // Generate clean hex characters without hyphens
             traceId = UUID.randomUUID().toString().replace("-", "");
