@@ -6,24 +6,33 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.4.0</version>
-        <relativePath/>
+        <groupId>com.hospital.his</groupId>
+        <artifactId>his-microservices-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
     </parent>
 
-    <groupId>com.hospital.his</groupId>
     <artifactId>his-api-gateway</artifactId>
     <version>1.0.0-SNAPSHOT</version>
     <name>his-api-gateway</name>
     <description>Hospital Information System - Reactive Spring Cloud Gateway with W3C Distributed Tracing</description>
 
     <properties>
+        <!-- Explicit Java 17 flags prevent IDE/Maven falling back to Language Level 5 -->
         <java.version>17</java.version>
-        <spring-cloud.version>2024.0.0</spring-cloud.version>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <maven.compiler.release>17</maven.compiler.release>
     </properties>
 
     <dependencies>
+        <!-- Shared Common Tracing Lib -->
+        <dependency>
+            <groupId>com.hospital.his</groupId>
+            <artifactId>common-tracing-lib</artifactId>
+            <version>1.0.0-SNAPSHOT</version>
+        </dependency>
+
         <!-- Spring Cloud Gateway (Reactive / Project Reactor / Netty) -->
         <dependency>
             <groupId>org.springframework.cloud</groupId>
@@ -55,20 +64,19 @@
         </dependency>
     </dependencies>
 
-    <dependencyManagement>
-        <dependencies>
-            <dependency>
-                <groupId>org.springframework.cloud</groupId>
-                <artifactId>spring-cloud-dependencies</artifactId>
-                <version>${spring-cloud.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
-        </dependencies>
-    </dependencyManagement>
-
     <build>
         <plugins>
+            <!-- Explicit Java 17 Compiler Configuration -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+                <configuration>
+                    <source>17</source>
+                    <target>17</target>
+                    <release>17</release>
+                </configuration>
+            </plugin>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
