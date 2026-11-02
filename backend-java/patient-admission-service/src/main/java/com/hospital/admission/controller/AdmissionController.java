@@ -10,7 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/api/v1/admissions")
+@RequestMapping
 public class AdmissionController {
 
     private static final Logger log = LoggerFactory.getLogger(AdmissionController.class);
@@ -20,7 +20,12 @@ public class AdmissionController {
         this.admissionService = admissionService;
     }
 
-    @PostMapping
+    @PostMapping({
+            "/api/v1/admissions",
+            "/api/v1/er/triage-admissions",
+            "/api/gateway/er/admissions",
+            "/api/api/gateway/er/admissions"
+    })
     public ResponseEntity<AdmissionResponse> createAdmission(
             @Valid @RequestBody AdmissionRequest request,
             @RequestHeader(value = "X-Correlation-ID", required = false) String correlationId) {

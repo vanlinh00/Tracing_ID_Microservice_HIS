@@ -8,17 +8,17 @@ spring:
     gateway:
       routes:
         - id: patient-admission-service-route
-          uri: lb://patient-admission-service
+          uri: ${PATIENT_ADMISSION_URI:http://localhost:8081}
           predicates:
-            - Path=/api/v1/er/**, /api/v1/admissions/**
+            - Path=/api/v1/er/**, /api/v1/admissions/**, /api/gateway/er/**, /api/api/gateway/er/**
         - id: clinical-chart-service-route
-          uri: lb://clinical-chart-service
+          uri: ${CLINICAL_CHART_URI:http://localhost:8082}
           predicates:
-            - Path=/api/v1/encounters/**
+            - Path=/api/v1/encounters/**, /api/gateway/encounters/**, /api/api/gateway/encounters/**
         - id: eprescription-service-route
-          uri: lb://eprescription-service
+          uri: ${EPRESCRIPTION_URI:http://localhost:8084}
           predicates:
-            - Path=/api/v1/prescriptions/**, /api/v1/pharmacy/**
+            - Path=/api/v1/prescriptions/**, /api/v1/pharmacy/**, /api/gateway/prescriptions/**, /api/api/gateway/prescriptions/**
 
 management:
   endpoints:

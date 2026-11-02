@@ -137,7 +137,7 @@ app.get('/api/health', (req: Request, res: Response) => {
 });
 
 // Ingress 1: ER Trauma Admission (Gateway -> Admission Service -> Chart Service -> Kafka)
-app.post('/api/gateway/er/admissions', async (req: Request, res: Response) => {
+app.post(['/api/v1/er/triage-admissions', '/api/v1/admissions', '/api/gateway/er/admissions', '/api/api/gateway/er/admissions'], async (req: Request, res: Response) => {
   const ctx = (req as any).traceContext;
   const { patientMRN = 'MRN-902148', triageLevel = 'ESI-1', ward = 'TRAUMA-BAY-3', attendingDoctorId = 'DOC-4482' } = req.body;
   const patientHash = pseudonymizeMrn(patientMRN);
@@ -256,7 +256,7 @@ app.post('/api/gateway/er/admissions', async (req: Request, res: Response) => {
 });
 
 // Ingress 2: Controlled Substance Prescription (EPCS DEA Compliance Flow)
-app.post('/api/gateway/prescriptions', async (req: Request, res: Response) => {
+app.post(['/api/v1/pharmacy/prescriptions', '/api/gateway/prescriptions', '/api/api/gateway/prescriptions'], async (req: Request, res: Response) => {
   const ctx = (req as any).traceContext;
   const { rxId = `RX-${Date.now().toString().slice(-6)}`, drugCode = 'NDC-0054-0235-25 (Morphine Sulfate 15mg)', prescriberDea = 'XD9921401' } = req.body;
 
