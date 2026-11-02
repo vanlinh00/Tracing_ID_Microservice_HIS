@@ -63,6 +63,9 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <mainClass>com.hospital.telemetry.TelemetryConsumerApplication</mainClass>
+                </configuration>
             </plugin>
         </plugins>
     </build>
