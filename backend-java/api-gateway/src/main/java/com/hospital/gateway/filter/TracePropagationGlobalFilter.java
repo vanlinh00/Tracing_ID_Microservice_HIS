@@ -49,7 +49,10 @@ public class TracePropagationGlobalFilter implements GlobalFilter, Ordered {
         String spanId = null;
 
         // 1. First Priority: Extract the active Spring WebFlux Observation on this exchange
-        Observation observation = exchange.getAttribute(ServerHttpObservationFilter.CURRENT_OBSERVATION_ATTRIBUTE);
+        Observation observation = ServerHttpObservationFilter.findObservation(exchange).orElse(null);
+        if (observation == null) {
+            observation = exchange.getAttribute(ServerHttpObservationFilter.class.getName() + ".observation");
+        }
         if (observation != null) {
             TracingObservationHandler.TracingContext tracingContext =
                     observation.getContextView().getOrDefault(TracingObservationHandler.TracingContext.class, null);
