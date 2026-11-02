@@ -1,0 +1,6 @@
+{
+  "name": "HIS Distributed Tracing Architecture & Reference",
+  "description": "Enterprise guide and interactive trace simulator for Spring Boot 3.4, Spring Cloud Gateway, and OpenTelemetry / W3C Trace Context in Healthcare Information Systems.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,17 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: clinical-chart-service
+
+management:
+  tracing:
+    sampling:
+      probability: 1.0
+    propagation:
+      type: W3C
+
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [clinical-chart-service,%X{traceId:-NO_TRACE},%X{spanId:-NO_SPAN}] [%t] %logger{36} : %msg%n"

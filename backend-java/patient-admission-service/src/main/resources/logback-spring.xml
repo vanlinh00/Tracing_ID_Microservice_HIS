@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <!-- Standardized Hospital Information System (HIS) Audit Pattern -->
+    <!-- Formats: ISO8601 Timestamp, Level, [TraceId, SpanId], [EncounterId], [Thread], Logger, Message -->
+    <property name="HIS_LOG_PATTERN"
+              value="%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [patient-admission-service,%X{traceId:-NO_TRACE},%X{spanId:-NO_SPAN}] [Encounter:%X{encounterId:-N/A}] [%t] %logger{36} : %msg%n"/>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${HIS_LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- Structured JSON format for Elastic / Splunk / Loki -->
+    <appender name="JSON_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <includeMdcKeyName>traceId</includeMdcKeyName>
+            <includeMdcKeyName>spanId</includeMdcKeyName>
+            <includeMdcKeyName>encounterId</includeMdcKeyName>
+            <includeMdcKeyName>patientIdHash</includeMdcKeyName>
+            <includeMdcKeyName>facilityId</includeMdcKeyName>
+        </encoder>
+    </appender>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+</configuration>
