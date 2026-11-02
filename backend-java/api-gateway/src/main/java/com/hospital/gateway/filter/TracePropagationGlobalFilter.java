@@ -1,5 +1,7 @@
 package com.hospital.gateway.filter;
 
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
@@ -16,11 +18,7 @@ import java.util.regex.Pattern;
 /**
  * Hospital Information System (HIS) - Enterprise Edge Trace Filter
  *
- * Responsibilities:
- * 1. Inspect incoming requests for W3C 'traceparent' header.
- * 2. If missing or invalid, generate RFC-compliant 32-character hex trace ID and 16-character span ID.
- * 3. Mutate the request passing the canonical W3C traceparent and X-Correlation-ID downstream.
- * 4. Add X-Correlation-ID to client response headers before committing.
+ * Coordinates OpenTelemetry / Micrometer W3C Trace Context with client correlation headers.
  */
 @Component
 public class TracePropagationGlobalFilter implements GlobalFilter, Ordered {
@@ -34,6 +32,12 @@ public class TracePropagationGlobalFilter implements GlobalFilter, Ordered {
     private static final Pattern W3C_TRACEPARENT_PATTERN =
             Pattern.compile("^00-[0-9a-fA-F]{32}-[0-9a-fA-F]{16}-[0-9a-fA-F]{2}$");
 
+    private final Tracer tracer;
+
+    public TracePropagationGlobalFilter(Tracer tracer) {
+        this.tracer = tracer;
+    }
+
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
         ServerHttpRequest request = exchange.getRequest();
@@ -43,35 +47,49 @@ public class TracePropagationGlobalFilter implements GlobalFilter, Ordered {
         String spanId;
         String outgoingTraceparent;
 
-        if (inboundTraceparent != null && W3C_TRACEPARENT_PATTERN.matcher(inboundTraceparent).matches()) {
+        // 1. Synchronize with Micrometer Tracer's active span if already initiated by ObservationWebFilter
+        Span currentSpan = tracer.currentSpan();
+
+        if (currentSpan != null) {
+            traceId = currentSpan.context().traceId();
+            spanId = currentSpan.context().spanId();
+            outgoingTraceparent = String.format("00-%s-%s-01", traceId, spanId);
+        } else if (inboundTraceparent != null && W3C_TRACEPARENT_PATTERN.matcher(inboundTraceparent).matches()) {
             String[] parts = inboundTraceparent.split("-");
             traceId = parts[1];
             spanId = parts[2];
             outgoingTraceparent = inboundTraceparent;
         } else {
-            // Generate clean hex characters without hyphens
-            traceId = UUID.randomUUID().toString().replace("-", "");
-            spanId = UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+            // Generate a real span via Micrometer Tracer
+            Span newSpan = tracer.nextSpan().name("gateway-ingress").start();
+            traceId = newSpan.context().traceId();
+            spanId = newSpan.context().spanId();
             outgoingTraceparent = String.format("00-%s-%s-01", traceId, spanId);
         }
 
-        // 1. Mutate downstream request headers
+        final String finalTraceId = traceId;
+        final String finalOutgoingTraceparent = outgoingTraceparent;
+
+        // 2. Overwrite headers using set() instead of add() so no duplicate headers are sent
         ServerHttpRequest mutatedRequest = request.mutate()
-                .header(TRACEPARENT_HEADER, outgoingTraceparent)
-                .header(CORRELATION_ID_HEADER, traceId)
+                .headers(httpHeaders -> {
+                    httpHeaders.set(TRACEPARENT_HEADER, finalOutgoingTraceparent);
+                    httpHeaders.set(CORRELATION_ID_HEADER, finalTraceId);
+                })
                 .build();
 
         ServerWebExchange mutatedExchange = exchange.mutate()
                 .request(mutatedRequest)
                 .build();
 
-        // 2. Attach X-Correlation-ID to response headers for the client / EHR terminal
+        // 3. Attach headers to downstream HTTP response
         mutatedExchange.getResponse().beforeCommit(() -> {
-            mutatedExchange.getResponse().getHeaders().set(CORRELATION_ID_HEADER, traceId);
+            mutatedExchange.getResponse().getHeaders().set(CORRELATION_ID_HEADER, finalTraceId);
+            mutatedExchange.getResponse().getHeaders().set(TRACEPARENT_HEADER, finalOutgoingTraceparent);
             return Mono.empty();
         });
 
-        // 3. Populate MDC for reactive thread logging so [traceId, spanId] is not NO_TRACE
+        // 4. Populate MDC for reactive thread logging
         org.slf4j.MDC.put("traceId", traceId);
         org.slf4j.MDC.put("spanId", spanId);
         try {
@@ -90,7 +108,6 @@ public class TracePropagationGlobalFilter implements GlobalFilter, Ordered {
 
     @Override
     public int getOrder() {
-        // Run before Spring Cloud Gateway routing filters
         return Ordered.HIGHEST_PRECEDENCE;
     }
 }

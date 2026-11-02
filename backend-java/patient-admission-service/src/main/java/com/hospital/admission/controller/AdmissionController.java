@@ -28,10 +28,11 @@ public class AdmissionController {
     })
     public ResponseEntity<AdmissionResponse> createAdmission(
             @Valid @RequestBody AdmissionRequest request,
+            @RequestHeader(value = "traceparent", required = false) String traceparent,
             @RequestHeader(value = "X-Correlation-ID", required = false) String correlationId) {
 
-        log.info("Incoming admission request for triage level: {}. CorrelationId: {}",
-                request.getTriageLevel(), correlationId);
+        log.info("Incoming admission request. Traceparent header: [{}], CorrelationId header: [{}]",
+                traceparent, correlationId);
 
         AdmissionResponse response = admissionService.processAdmission(request);
         return ResponseEntity.ok(response);
