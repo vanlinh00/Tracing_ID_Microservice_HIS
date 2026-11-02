@@ -56,6 +56,7 @@ function pseudonymizeMrn(mrn: string): string {
 // =========================================================================
 app.use((req: Request, res: Response, next: NextFunction) => {
   const inboundTraceparent = req.header('traceparent');
+  const inboundXTraceId = req.header('x-trace-id') || req.header('x-correlation-id');
   const w3cRegex = /^00-([0-9a-fA-F]{32})-([0-9a-fA-F]{16})-([0-9a-fA-F]{2})$/;
 
   let traceId: string;
@@ -67,6 +68,10 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     traceId = match![1];
     spanId = crypto.randomBytes(8).toString('hex'); // 16 hex chars for downstream child span
     outgoingTraceparent = `00-${traceId}-${spanId}-01`;
+  } else if (inboundXTraceId && /^[0-9a-fA-F]{16,32}$/.test(inboundXTraceId)) {
+    traceId = inboundXTraceId;
+    spanId = crypto.randomBytes(8).toString('hex');
+    outgoingTraceparent = `00-${traceId.padStart(32, '0')}-${spanId}-01`;
   } else {
     // Generate fresh W3C identifiers: 32 hex for traceId, 16 hex for spanId
     traceId = crypto.randomBytes(16).toString('hex');
@@ -77,6 +82,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   // Inject into request context & headers
   req.headers['traceparent'] = outgoingTraceparent;
   req.headers['x-correlation-id'] = traceId;
+  req.headers['x-trace-id'] = traceId;
   (req as any).traceContext = {
     traceId,
     spanId,
@@ -84,7 +90,8 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     startTime: Date.now()
   };
 
-  // Attach X-Correlation-ID to client response headers
+  // Attach X-Trace-Id & X-Correlation-ID to client response headers
+  res.setHeader('X-Trace-Id', traceId);
   res.setHeader('X-Correlation-ID', traceId);
   res.setHeader('traceparent', outgoingTraceparent);
 
@@ -431,6 +438,7 @@ app.get('/', (req: Request, res: Response) => {
       system: 'Hospital Information System (HIS) Distributed Tracing Engine',
       architecture: '100% Backend (Spring Boot 3.4.0, Java 17, Spring Cloud Gateway, Micrometer, W3C)',
       endpoints: [
+        'POST /api/v1/er/triage-admissions',
         'POST /api/gateway/er/admissions',
         'POST /api/gateway/prescriptions',
         'GET /api/traces/:traceId',
@@ -467,7 +475,7 @@ app.get('/', (req: Request, res: Response) => {
   <p>This application is 100% backend. All frontend code has been removed. The active microservices architecture files are located in <code>/backend-java/</code> and the backend REST API is running directly on this server.</p>
 
   <h2>Available Backend Endpoints</h2>
-  <div class="endpoint"><strong>POST /api/gateway/er/admissions</strong> - Ingests ER trauma request, generates/injects W3C traceparent, propagates to clinical-chart-service and Kafka</div>
+  <div class="endpoint"><strong>POST /api/v1/er/triage-admissions</strong> - Ingests ER trauma request, generates/injects W3C traceparent, propagates to clinical-chart-service and Kafka</div>
   <div class="endpoint"><strong>POST /api/gateway/prescriptions</strong> - Submits EPCS DEA controlled substance order with salted patientIdHash audit trail</div>
   <div class="endpoint"><strong>GET /api/traces/:traceId</strong> - Inspects full distributed span tree across Gateway, HTTP Clients, and Kafka</div>
   <div class="endpoint"><strong>GET /api/logs</strong> - Streams unified Logback MDC logs correlated by Trace ID</div>

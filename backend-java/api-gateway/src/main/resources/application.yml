@@ -8,38 +8,10 @@ spring:
     gateway:
       routes:
         - id: patient-admission-service-route
-          uri: ${PATIENT_ADMISSION_URI:http://localhost:8081}
+          uri: http://localhost:8081
           predicates:
-            - Path=/api/v1/er/**, /api/v1/admissions/**, /api/gateway/er/**, /api/api/gateway/er/**
-        - id: clinical-chart-service-route
-          uri: ${CLINICAL_CHART_URI:http://localhost:8082}
-          predicates:
-            - Path=/api/v1/encounters/**, /api/gateway/encounters/**, /api/api/gateway/encounters/**
-        - id: eprescription-service-route
-          uri: ${EPRESCRIPTION_URI:http://localhost:8084}
-          predicates:
-            - Path=/api/v1/prescriptions/**, /api/v1/pharmacy/**, /api/gateway/prescriptions/**, /api/api/gateway/prescriptions/**
-
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health,info,prometheus,metrics
-  tracing:
-    sampling:
-      probability: 1.0 # 100% trace sampling required for clinical trauma & DEA audit flows
-    propagation:
-      type: W3C # Enforce W3C Trace Context (traceparent, tracestate)
-  otlp:
-    tracing:
-      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318/v1/traces}
-      export:
-        enabled: ${OTEL_EXPORT_ENABLED:false} # Set to true when OTel Collector / Jaeger is active
+            - Path=/api/v1/er/**, /api/v1/admissions/**, /api/gateway/er/**, /api/api/gateway/er/**, /api/v1/pharmacy/**, /api/gateway/prescriptions/**, /api/api/gateway/prescriptions/**
 
 logging:
-  level:
-    root: INFO
-    org.springframework.cloud.gateway: INFO
-    com.hospital.gateway: DEBUG
   pattern:
-    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [his-api-gateway,%X{traceId:-NO_TRACE},%X{spanId:-NO_SPAN}] [%t] %logger{36} : %msg%n"
+    level: "%5p [${spring.application.name:},%X{traceId:-},%X{spanId:-}]"

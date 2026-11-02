@@ -1,27 +1,21 @@
 package com.hospital.gateway.filter;
 
-import io.micrometer.observation.Observation;
-import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
-import io.micrometer.tracing.handler.TracingObservationHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.stereotype.Component;
-import org.springframework.web.filter.reactive.ServerHttpObservationFilter;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
+import java.util.UUID;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/**
- * Hospital Information System (HIS) - Enterprise Edge Trace Filter
- *
- * Coordinates OpenTelemetry / Micrometer W3C Trace Context with client correlation headers.
- */
 @Component
 public class TracePropagationGlobalFilter implements GlobalFilter, Ordered {
 
@@ -29,105 +23,84 @@ public class TracePropagationGlobalFilter implements GlobalFilter, Ordered {
 
     public static final String TRACEPARENT_HEADER = "traceparent";
     public static final String CORRELATION_ID_HEADER = "X-Correlation-ID";
+    public static final String TRACE_ID_HEADER = "X-Trace-Id";
 
-    // W3C Pattern: version(2)-traceId(32)-spanId(16)-traceFlags(2)
-    private static final Pattern W3C_TRACEPARENT_PATTERN =
-            Pattern.compile("^00-[0-9a-fA-F]{32}-[0-9a-fA-F]{16}-[0-9a-fA-F]{2}$");
+    private static final Pattern W3C_PATTERN =
+            Pattern.compile("^00-([0-9a-fA-F]{32})-([0-9a-fA-F]{16})-([0-9a-fA-F]{2})$");
 
     private final Tracer tracer;
 
+    @Autowired(required = false)
     public TracePropagationGlobalFilter(Tracer tracer) {
         this.tracer = tracer;
+    }
+
+    public TracePropagationGlobalFilter() {
+        this.tracer = null;
     }
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
         ServerHttpRequest request = exchange.getRequest();
-        String inboundTraceparent = request.getHeaders().getFirst(TRACEPARENT_HEADER);
+        String inbound = request.getHeaders().getFirst(TRACEPARENT_HEADER);
+        String inboundCorrelationId = request.getHeaders().getFirst(CORRELATION_ID_HEADER);
+        String inboundTraceId = request.getHeaders().getFirst(TRACE_ID_HEADER);
 
-        String traceId = null;
-        String spanId = null;
+        String traceId;
+        String spanId;
+        String outgoingTraceparent;
 
-        // 1. First Priority: Extract the active Spring WebFlux Observation on this exchange
-        Observation observation = ServerHttpObservationFilter.findObservation(exchange).orElse(null);
-        if (observation == null) {
-            observation = exchange.getAttribute(ServerHttpObservationFilter.class.getName() + ".observation");
-        }
-        if (observation != null) {
-            TracingObservationHandler.TracingContext tracingContext =
-                    observation.getContextView().getOrDefault(TracingObservationHandler.TracingContext.class, null);
-            if (tracingContext != null && tracingContext.getSpan() != null) {
-                traceId = tracingContext.getSpan().context().traceId();
-                spanId = tracingContext.getSpan().context().spanId();
-            }
-        }
-
-        // 2. Second Priority: Check if Tracer has an active span
-        if (traceId == null) {
-            Span currentSpan = tracer.currentSpan();
-            if (currentSpan != null) {
-                traceId = currentSpan.context().traceId();
-                spanId = currentSpan.context().spanId();
-            }
-        }
-
-        // 3. Third Priority: If client sent an explicit W3C header, parse it
-        if (traceId == null && inboundTraceparent != null && W3C_TRACEPARENT_PATTERN.matcher(inboundTraceparent).matches()) {
-            String[] parts = inboundTraceparent.split("-");
-            traceId = parts[1];
-            spanId = parts[2];
+        if (inbound != null && W3C_PATTERN.matcher(inbound).matches()) {
+            Matcher matcher = W3C_PATTERN.matcher(inbound);
+            matcher.find();
+            traceId = matcher.group(1);
+            spanId = UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+            outgoingTraceparent = String.format("00-%s-%s-01", traceId, spanId);
+        } else if (tracer != null && tracer.currentSpan() != null) {
+            traceId = tracer.currentSpan().context().traceId();
+            spanId = UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+            outgoingTraceparent = String.format("00-%s-%s-01", traceId, spanId);
+        } else if (inboundCorrelationId != null && !inboundCorrelationId.isBlank()) {
+            traceId = inboundCorrelationId.trim();
+            spanId = UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+            outgoingTraceparent = String.format("00-%s-%s-01", traceId, spanId);
+        } else if (inboundTraceId != null && !inboundTraceId.isBlank()) {
+            traceId = inboundTraceId.trim();
+            spanId = UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+            outgoingTraceparent = String.format("00-%s-%s-01", traceId, spanId);
+        } else {
+            traceId = UUID.randomUUID().toString().replace("-", ""); // 32 hex
+            spanId = UUID.randomUUID().toString().replace("-", "").substring(0, 16); // 16 hex
+            outgoingTraceparent = String.format("00-%s-%s-01", traceId, spanId);
         }
 
-        // 4. Fallback: Generate valid identifiers if no observation was found
-        if (traceId == null) {
-            Span newSpan = tracer.nextSpan().name("gateway-ingress").start();
-            traceId = newSpan.context().traceId();
-            spanId = newSpan.context().spanId();
-        }
+        log.info("[GATEWAY-INGRESS] Path={} Method={} TraceId={} ClientIP={}",
+                request.getPath(), request.getMethod(), traceId, request.getRemoteAddress());
 
-        String outgoingTraceparent = String.format("00-%s-%s-01", traceId, spanId);
-        final String finalTraceId = traceId;
-        final String finalOutgoingTraceparent = outgoingTraceparent;
-
-        // Mutate downstream headers using set() so Netty and downstream receive identical headers
+        // 1. Mutate request headers sent downstream
         ServerHttpRequest mutatedRequest = request.mutate()
-                .headers(httpHeaders -> {
-                    httpHeaders.set(TRACEPARENT_HEADER, finalOutgoingTraceparent);
-                    httpHeaders.set(CORRELATION_ID_HEADER, finalTraceId);
-                })
+                .header(TRACEPARENT_HEADER, outgoingTraceparent)
+                .header(CORRELATION_ID_HEADER, traceId)
+                .header(TRACE_ID_HEADER, traceId)
                 .build();
 
         ServerWebExchange mutatedExchange = exchange.mutate()
                 .request(mutatedRequest)
                 .build();
 
-        // Attach X-Correlation-ID and traceparent to client HTTP response
+        // 2. Attach X-Correlation-ID, X-Trace-Id, and traceparent to client response headers
         mutatedExchange.getResponse().beforeCommit(() -> {
-            mutatedExchange.getResponse().getHeaders().set(CORRELATION_ID_HEADER, finalTraceId);
-            mutatedExchange.getResponse().getHeaders().set(TRACEPARENT_HEADER, finalOutgoingTraceparent);
+            mutatedExchange.getResponse().getHeaders().set(CORRELATION_ID_HEADER, traceId);
+            mutatedExchange.getResponse().getHeaders().set(TRACE_ID_HEADER, traceId);
+            mutatedExchange.getResponse().getHeaders().set(TRACEPARENT_HEADER, outgoingTraceparent);
             return Mono.empty();
         });
-
-        // Populate MDC for reactive thread logging
-        org.slf4j.MDC.put("traceId", finalTraceId);
-        org.slf4j.MDC.put("spanId", spanId);
-        try {
-            log.info("[GATEWAY-INGRESS] Path={} Method={} TraceId={} ClientIP={}",
-                    request.getPath(),
-                    request.getMethod(),
-                    finalTraceId,
-                    request.getRemoteAddress());
-        } finally {
-            org.slf4j.MDC.remove("traceId");
-            org.slf4j.MDC.remove("spanId");
-        }
 
         return chain.filter(mutatedExchange);
     }
 
     @Override
     public int getOrder() {
-        // Run after ServerHttpObservationFilter has initiated the WebFlux Observation
-        return Ordered.HIGHEST_PRECEDENCE + 10;
+        return Ordered.HIGHEST_PRECEDENCE;
     }
 }

@@ -14,11 +14,9 @@
 
     <artifactId>his-api-gateway</artifactId>
     <version>1.0.0-SNAPSHOT</version>
-    <name>his-api-gateway</name>
-    <description>Hospital Information System - Reactive Spring Cloud Gateway with W3C Distributed Tracing</description>
+    <name>api-gateway</name>
 
     <properties>
-        <!-- Explicit Java 17 flags prevent IDE/Maven falling back to Language Level 5 -->
         <java.version>17</java.version>
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
@@ -26,47 +24,21 @@
     </properties>
 
     <dependencies>
-        <!-- Shared Common Tracing Lib -->
-        <dependency>
-            <groupId>com.hospital.his</groupId>
-            <artifactId>common-tracing-lib</artifactId>
-            <version>1.0.0-SNAPSHOT</version>
-        </dependency>
-
-        <!-- Spring Cloud Gateway (Reactive / Project Reactor / Netty) -->
+        <!-- Spring Cloud Gateway -->
         <dependency>
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-gateway</artifactId>
         </dependency>
 
-        <!-- Production Health, Metrics & Observability -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-actuator</artifactId>
-        </dependency>
-
-        <!-- Micrometer Tracing API -->
+        <!-- Micrometer Tracing Bridge Brave (Zero remote network dependencies) -->
         <dependency>
             <groupId>io.micrometer</groupId>
-            <artifactId>micrometer-tracing</artifactId>
-        </dependency>
-
-        <!-- OpenTelemetry Bridge for W3C Trace Context support -->
-        <dependency>
-            <groupId>io.micrometer</groupId>
-            <artifactId>micrometer-tracing-bridge-otel</artifactId>
-        </dependency>
-
-        <!-- OpenTelemetry OTLP Exporter to Grafana Tempo / Jaeger -->
-        <dependency>
-            <groupId>io.opentelemetry</groupId>
-            <artifactId>opentelemetry-exporter-otlp</artifactId>
+            <artifactId>micrometer-tracing-bridge-brave</artifactId>
         </dependency>
     </dependencies>
 
     <build>
         <plugins>
-            <!-- Explicit Java 17 Compiler Configuration -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
@@ -80,6 +52,9 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <mainClass>com.hospital.gateway.GatewayApplication</mainClass>
+                </configuration>
             </plugin>
         </plugins>
     </build>
