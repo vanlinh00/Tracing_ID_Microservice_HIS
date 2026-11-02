@@ -25,4 +25,4 @@ management:
 
 clinical:
   chart-service:
-    url: "http://clinical-chart-service.his.internal:8082"
+    url: ${CLINICAL_CHART_SERVICE_URL:http://localhost:8082}

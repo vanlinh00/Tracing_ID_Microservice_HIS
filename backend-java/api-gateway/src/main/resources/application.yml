@@ -32,7 +32,9 @@ management:
       type: W3C # Enforce W3C Trace Context (traceparent, tracestate)
   otlp:
     tracing:
-      endpoint: "http://otel-collector.his.internal:4318/v1/traces"
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318/v1/traces}
+      export:
+        enabled: ${OTEL_EXPORT_ENABLED:false} # Set to true when OTel Collector / Jaeger is active
 
 logging:
   level:

@@ -69,11 +69,19 @@ public class TracePropagationGlobalFilter implements GlobalFilter, Ordered {
             return Mono.empty();
         });
 
-        log.info("[GATEWAY-INGRESS] Path={} Method={} TraceId={} ClientIP={}",
-                request.getPath(),
-                request.getMethod(),
-                traceId,
-                request.getRemoteAddress());
+        // 3. Populate MDC for reactive thread logging so [traceId, spanId] is not NO_TRACE
+        org.slf4j.MDC.put("traceId", traceId);
+        org.slf4j.MDC.put("spanId", spanId);
+        try {
+            log.info("[GATEWAY-INGRESS] Path={} Method={} TraceId={} ClientIP={}",
+                    request.getPath(),
+                    request.getMethod(),
+                    traceId,
+                    request.getRemoteAddress());
+        } finally {
+            org.slf4j.MDC.remove("traceId");
+            org.slf4j.MDC.remove("spanId");
+        }
 
         return chain.filter(mutatedExchange);
     }
