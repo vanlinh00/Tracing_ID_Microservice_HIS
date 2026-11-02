@@ -1,0 +1,469 @@
+{
+  "info": {
+    "_postman_id": "c797036f-433a-4702-bdf1-e8371fdf6101",
+    "name": "HIS Distributed Tracing & W3C Trace Context API",
+    "description": "Postman test suite for verifying distributed trace propagation (W3C traceparent, X-Correlation-ID, SLF4J MDC logs) across Hospital Information System (HIS) Spring Boot 3.4.0 microservices and the Gateway engine.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "springGatewayUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "springAdmissionServiceUrl",
+      "value": "http://localhost:8081",
+      "type": "string"
+    },
+    {
+      "key": "lastTraceId",
+      "value": "4bf92f3577b34da6a3ce929d0e0e4736",
+      "type": "string"
+    },
+    {
+      "key": "lastTraceparent",
+      "value": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "01. Observability & Health Check",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/health",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "health"]
+        },
+        "description": "Verifies that the backend tracing engine is running and configured for W3C OpenTelemetry standard."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status code is 200', function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Backend standard is W3C OpenTelemetry', function () {",
+              "    const jsonData = pm.response.json();",
+              "    pm.expect(jsonData.status).to.eql('UP');",
+              "    pm.expect(jsonData.standard).to.include('W3C');",
+              "    pm.expect(jsonData.springBootTarget).to.eql('3.4.0');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "02. ER Admission - Generate Root Trace ID (Auto-Generated)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"patientMRN\": \"MRN-902148\",\n  \"triageLevel\": \"ESI-1 (Immediate Resuscitation)\",\n  \"ward\": \"TRAUMA-BAY-3\",\n  \"attendingDoctorId\": \"DOC-4482\",\n  \"vitalAlert\": \"Systolic BP < 80, SpO2 88%\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/gateway/er/admissions",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "gateway", "er", "admissions"]
+        },
+        "description": "Simulates an emergency room triage admission. When no inbound trace header is present, the API Gateway generates a compliant 32-hex Trace ID and 16-hex Span ID, propagates it downstream to clinical-chart-service via RestClient and publishes an asynchronous Kafka event with trace headers."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status code is 200 OK', function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Response contains W3C traceparent header', function () {",
+              "    const traceparent = pm.response.headers.get('traceparent');",
+              "    pm.expect(traceparent).to.not.be.null;",
+              "    // W3C Pattern: 00-{32 hex trace}-{16 hex span}-{2 hex flags}",
+              "    const w3cRegex = /^00-[0-9a-fA-F]{32}-[0-9a-fA-F]{16}-[0-9a-fA-F]{2}$/;",
+              "    pm.expect(traceparent).to.match(w3cRegex);",
+              "});",
+              "",
+              "pm.test('Response contains matching X-Correlation-ID header', function () {",
+              "    const correlationId = pm.response.headers.get('X-Correlation-ID');",
+              "    const traceparent = pm.response.headers.get('traceparent');",
+              "    pm.expect(correlationId).to.not.be.null;",
+              "    pm.expect(correlationId.length).to.eql(32);",
+              "    // Correlation ID must be identical to the 32-hex Trace ID inside traceparent",
+              "    pm.expect(traceparent).to.include(correlationId);",
+              "});",
+              "",
+              "pm.test('Payload contains pseudonymized patient hash (HIPAA check)', function () {",
+              "    const jsonData = pm.response.json();",
+              "    pm.expect(jsonData.patientPseudonym).to.not.eql('MRN-902148');",
+              "    pm.expect(jsonData.patientPseudonym.length).to.be.at.least(16);",
+              "    ",
+              "    // Save Trace ID and traceparent for downstream test verification",
+              "    pm.collectionVariables.set('lastTraceId', jsonData.traceId);",
+              "    pm.collectionVariables.set('lastTraceparent', jsonData.traceparent);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "03. ER Admission - Pass Existing Upstream Traceparent (Propagation Check)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "traceparent",
+            "value": "00-7c81d830114f49e0a02efc24190b21a3-00f067aa0ba902b7-01",
+            "description": "Existing W3C Trace Context from upstream hospital portal or ambulance dispatch"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"patientMRN\": \"MRN-771920\",\n  \"triageLevel\": \"ESI-2 (Emergent)\",\n  \"ward\": \"CARDIO-BAY-1\",\n  \"attendingDoctorId\": \"DOC-9912\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/gateway/er/admissions",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "gateway", "er", "admissions"]
+        },
+        "description": "Verifies that when an upstream caller provides a valid W3C traceparent, the Gateway preserves the Trace ID (7c81d830114f49e0a02efc24190b21a3) without regenerating a new one."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status code is 200 OK', function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Preserves upstream 32-hex Trace ID exactly', function () {",
+              "    const expectedTraceId = '7c81d830114f49e0a02efc24190b21a3';",
+              "    const jsonData = pm.response.json();",
+              "    pm.expect(jsonData.traceId).to.eql(expectedTraceId);",
+              "    pm.expect(pm.response.headers.get('X-Correlation-ID')).to.eql(expectedTraceId);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "04. E-Prescription - Controlled Substance (EPCS DEA Audit Flow)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"rxId\": \"RX-2026-081442\",\n  \"drugCode\": \"NDC-0054-0235-25 (Morphine Sulfate 15mg)\",\n  \"prescriberDea\": \"XD9921401\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/gateway/prescriptions",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "gateway", "prescriptions"]
+        },
+        "description": "Simulates DEA EPCS schedule II controlled substance order. Traces through Gateway -> Prescription Service -> Drug Interaction Service -> Kafka DEA Audit Sink."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status code is 200 OK', function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Verified 4 microservice hops executed under single trace', function () {",
+              "    const jsonData = pm.response.json();",
+              "    pm.expect(jsonData.hopsCompleted).to.eql(4);",
+              "    pm.expect(jsonData.spans.length).to.eql(4);",
+              "    ",
+              "    // Verify service names",
+              "    const services = jsonData.spans.map(s => s.service);",
+              "    pm.expect(services).to.include('his-api-gateway');",
+              "    pm.expect(services).to.include('eprescription-service');",
+              "    pm.expect(services).to.include('drug-interaction-service');",
+              "    pm.expect(services).to.include('dea-audit-service');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "05. Inspect Distributed Span Tree by Trace ID",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/traces/{{lastTraceId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "traces", "{{lastTraceId}}"]
+        },
+        "description": "Fetches the full distributed span tree for the recorded Trace ID. Confirms that all child spans have matching traceId and valid parent-child spanId linkages."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status code is 200 OK', function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('All spans share the exact same root traceId', function () {",
+              "    const jsonData = pm.response.json();",
+              "    const rootTraceId = jsonData.traceId;",
+              "    pm.expect(rootTraceId).to.eql(pm.collectionVariables.get('lastTraceId'));",
+              "    ",
+              "    jsonData.spans.forEach(span => {",
+              "        pm.expect(span.traceId).to.eql(rootTraceId);",
+              "        pm.expect(span.spanId.length).to.eql(16);",
+              "    });",
+              "});",
+              "",
+              "pm.test('Root span has no parent, downstream spans have valid parentSpanId', function () {",
+              "    const jsonData = pm.response.json();",
+              "    const rootSpan = jsonData.spans[0];",
+              "    pm.expect(rootSpan.parentSpanId).to.be.undefined;",
+              "    ",
+              "    for (let i = 1; i < jsonData.spans.length; i++) {",
+              "        pm.expect(jsonData.spans[i].parentSpanId).to.not.be.undefined;",
+              "    }",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "06. Inspect Correlated Log Stream by Trace ID (MDC Verification)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/logs?traceId={{lastTraceId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "logs"],
+          "query": [
+            {
+              "key": "traceId",
+              "value": "{{lastTraceId}}"
+            }
+          ]
+        },
+        "description": "Verifies that SLF4J MDC pattern [%X{traceId}, %X{spanId}] successfully correlated logs across all microservices for this trace."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status code is 200 OK', function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('All filtered log lines contain the matching traceId', function () {",
+              "    const jsonData = pm.response.json();",
+              "    pm.expect(jsonData.total).to.be.above(0);",
+              "    ",
+              "    jsonData.logs.forEach(log => {",
+              "        pm.expect(log.traceId).to.eql(pm.collectionVariables.get('lastTraceId'));",
+              "        pm.expect(log.mdc.traceId).to.eql(pm.collectionVariables.get('lastTraceId'));",
+              "    });",
+              "});",
+              "",
+              "pm.test('HIPAA check: logs contain no raw MRN plaintext', function () {",
+              "    const rawBody = pm.response.text();",
+              "    pm.expect(rawBody).to.not.include('MRN-902148');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "07. List All Recorded Distributed Traces",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/traces",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "traces"]
+        },
+        "description": "Returns a summary list of all transactions executed through the distributed tracing pipeline."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status code is 200 OK', function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Response returns array of traces', function () {",
+              "    const jsonData = pm.response.json();",
+              "    pm.expect(jsonData.traces).to.be.an('array');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "08. Tool - Parse & Validate W3C Traceparent Header",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"traceparent\": \"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/tools/parse-traceparent",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "tools", "parse-traceparent"]
+        },
+        "description": "Utility endpoint that parses an RFC W3C traceparent string into its component parts: version, traceId, parentSpanId, and flags."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status code is 200 OK', function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Parses W3C fields accurately', function () {",
+              "    const jsonData = pm.response.json();",
+              "    pm.expect(jsonData.valid).to.eql(true);",
+              "    pm.expect(jsonData.version).to.eql('00');",
+              "    pm.expect(jsonData.traceId).to.eql('4bf92f3577b34da6a3ce929d0e0e4736');",
+              "    pm.expect(jsonData.parentSpanId).to.eql('00f067aa0ba902b7');",
+              "    pm.expect(jsonData.flags).to.eql('01');",
+              "    pm.expect(jsonData.isSampled).to.eql(true);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "09. Spring Cloud Gateway Live Route (Port 8080)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"patientMRN\": \"MRN-902148\",\n  \"triageLevel\": \"ESI-1\",\n  \"ward\": \"TRAUMA-BAY-3\",\n  \"attendingDoctorId\": \"DOC-4482\"\n}"
+        },
+        "url": {
+          "raw": "{{springGatewayUrl}}/api/v1/er/triage-admissions",
+          "host": ["{{springGatewayUrl}}"],
+          "path": ["api", "v1", "er", "triage-admissions"]
+        },
+        "description": "Direct request to the Java Spring Cloud Gateway on port 8080 when running the backend-java microservices stack locally."
+      }
+    },
+    {
+      "name": "10. Patient Admission Service Direct REST (Port 8081)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "traceparent",
+            "value": "{{lastTraceparent}}"
+          },
+          {
+            "key": "X-Correlation-ID",
+            "value": "{{lastTraceId}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"patientMRN\": \"MRN-902148\",\n  \"triageLevel\": \"ESI-1\",\n  \"ward\": \"TRAUMA-BAY-3\",\n  \"attendingDoctorId\": \"DOC-4482\"\n}"
+        },
+        "url": {
+          "raw": "{{springAdmissionServiceUrl}}/api/v1/admissions",
+          "host": ["{{springAdmissionServiceUrl}}"],
+          "path": ["api", "v1", "admissions"]
+        },
+        "description": "Direct request to the Java Patient Admission Service on port 8081 testing internal RestClient and Kafka emission."
+      }
+    }
+  ]
+}
